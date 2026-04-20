@@ -4,7 +4,7 @@ from database import SessionLocal
 from models.cart import CartItem
 from models.product import Product
 from schemas.cart import CartCreate
-from utils.auth import get_current_user   # your JWT function
+from utils.auth import get_current_user
 
 router = APIRouter()
 
@@ -17,22 +17,34 @@ def get_db():
     finally:
         db.close()
 
+
+# ✅ Helper: serialize cart items
+def serialize_cart(items):
+    result = []
+    for item in items:
+        result.append({
+            "cart_id": item.id,
+            "product_id": item.product_id,
+            "quantity": item.quantity
+        })
+    return result
+
+
+# ✅ 1. ADD TO CART
 @router.post("/cart")
 def add_to_cart(
     data: CartCreate,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    # ❌ Invalid quantity
     if data.quantity <= 0:
         raise HTTPException(status_code=400, detail="Invalid quantity")
 
-    # ❌ Product not found
     product = db.query(Product).filter(Product.id == data.product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    # ✅ Check if already in cart → update quantity
+    # ✅ Check existing item
     existing_item = db.query(CartItem).filter(
         CartItem.user_id == current_user.id,
         CartItem.product_id == data.product_id
@@ -52,6 +64,8 @@ def add_to_cart(
 
     return {"message": "Added to cart"}
 
+
+# ✅ 2. GET CART (CLEAN RESPONSE)
 @router.get("/cart")
 def get_my_cart(
     db: Session = Depends(get_db),
@@ -61,8 +75,10 @@ def get_my_cart(
         CartItem.user_id == current_user.id
     ).all()
 
-    return cart_items
+    return serialize_cart(cart_items)
 
+
+# ✅ 3. DELETE CART ITEM
 @router.delete("/cart/{id}")
 def delete_cart(
     id: int,
@@ -71,7 +87,7 @@ def delete_cart(
 ):
     item = db.query(CartItem).filter(
         CartItem.id == id,
-        CartItem.user_id == current_user.id   # ✅ IMPORTANT
+        CartItem.user_id == current_user.id
     ).first()
 
     if not item:

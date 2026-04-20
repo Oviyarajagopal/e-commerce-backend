@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models.cart import CartItem
@@ -16,8 +16,25 @@ def get_db():
     finally:
         db.close()
 
+
+# ✅ Background Email Function
+def send_order_email(email: str, order_id: int, total: float):
+    print(f"""
+📧 Sending Email...
+To: {email}
+
+Hello,
+Your order #{order_id} has been placed successfully!
+Total Amount: ₹{total}
+
+Thank you for shopping!
+""")
+
+
+# ✅ PLACE ORDER (WITH BACKGROUND TASK)
 @router.post("/orders/place")
 def place_order(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
@@ -68,9 +85,7 @@ def place_order(
             price=product.price
         )
 
-        # reduce stock
         product.stock -= item.quantity
-
         db.add(order_item)
 
     # 5️⃣ Clear cart
@@ -80,30 +95,12 @@ def place_order(
 
     db.commit()
 
-    return {"message": "Order placed successfully"}        
+    # 🔥 6️⃣ BACKGROUND EMAIL (IMPORTANT)
+    background_tasks.add_task(
+        send_order_email,
+        current_user.email,   # user email
+        order.id,
+        total_amount
+    )
 
-@router.get("/orders")
-def get_my_orders(
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    orders = db.query(Order).filter(
-        Order.user_id == current_user.id
-    ).all()
-
-    result = []
-
-    for order in orders:
-        items = db.query(OrderItem).filter(
-            OrderItem.order_id == order.id
-        ).all()
-
-        result.append({
-            "order_id": order.id,
-            "total_amount": order.total_amount,
-            "status": order.status,
-            "created_at": order.created_at,
-            "items": items
-        })
-
-    return result
+    return {"message": "Order placed successfully"}
