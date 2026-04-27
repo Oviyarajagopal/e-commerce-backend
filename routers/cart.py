@@ -1,33 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session, selectinload   # ✅ added
 from database import SessionLocal
 from models.cart import CartItem
 from models.product import Product
 from schemas.cart import CartCreate
 from utils.auth import get_current_user
+import time
 
 router = APIRouter()
 
 
-# DB Dependency
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
-
-
-# ✅ Helper: serialize cart items
-def serialize_cart(items):
-    result = []
-    for item in items:
-        result.append({
-            "cart_id": item.id,
-            "product_id": item.product_id,
-            "quantity": item.quantity
-        })
-    return result
 
 
 # ✅ 1. ADD TO CART
@@ -38,13 +26,21 @@ def add_to_cart(
     current_user = Depends(get_current_user)
 ):
     if data.quantity <= 0:
-        raise HTTPException(status_code=400, detail="Invalid quantity")
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "message": "Invalid quantity"}
+        )
 
+    start_time = time.time()
     product = db.query(Product).filter(Product.id == data.product_id).first()
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+    print(f"⏱️ Product lookup took {time.time() - start_time:.4f} sec")
 
-    # ✅ Check existing item
+    if not product:
+        raise HTTPException(
+            status_code=404,
+            detail={"success": False, "message": "Product not found"}
+        )
+
     existing_item = db.query(CartItem).filter(
         CartItem.user_id == current_user.id,
         CartItem.product_id == data.product_id
@@ -62,20 +58,74 @@ def add_to_cart(
 
     db.commit()
 
-    return {"message": "Added to cart"}
+    return {
+        "success": True,
+        "message": "Added to cart"
+    }
 
 
-# ✅ 2. GET CART (CLEAN RESPONSE)
+# ✅ 2. GET CART (N+1 FIXED + PRODUCT DETAILS)
 @router.get("/cart")
 def get_my_cart(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=50),
+    sort_by: str = "created_at",
+    order: str = "desc",
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    cart_items = db.query(CartItem).filter(
-        CartItem.user_id == current_user.id
-    ).all()
+    offset = (page - 1) * limit
 
-    return serialize_cart(cart_items)
+    # ✅ N+1 FIX → preload product
+    query = db.query(CartItem).options(
+        selectinload(CartItem.product)   # 🔥 KEY LINE
+    ).filter(
+        CartItem.user_id == current_user.id
+    )
+
+    # SORTING
+    allowed_sort_fields = {
+        "created_at": CartItem.created_at,
+        "quantity": CartItem.quantity
+    }
+
+    if sort_by in allowed_sort_fields:
+        column = allowed_sort_fields[sort_by]
+        query = query.order_by(column.desc() if order == "desc" else column.asc())
+
+    # ⏱️ COUNT
+    start_time = time.time()
+    total = query.count()
+    print(f"⏱️ Cart count took {time.time() - start_time:.4f} sec")
+
+    # ⏱️ FETCH
+    start_time = time.time()
+    cart_items = query.offset(offset).limit(limit).all()
+    print(f"⏱️ Cart fetch took {time.time() - start_time:.4f} sec")
+
+    # ✅ RESPONSE WITH PRODUCT DETAILS
+    result = []
+    for item in cart_items:
+        result.append({
+            "cart_id": item.id,
+            "quantity": item.quantity,
+            "product": {
+                "id": item.product.id,
+                "name": item.product.name,
+                "price": item.product.price
+            }
+        })
+
+    return {
+        "success": True,
+        "message": "Cart fetched successfully",
+        "data": result,
+        "meta": {
+            "page": page,
+            "limit": limit,
+            "total": total
+        }
+    }
 
 
 # ✅ 3. DELETE CART ITEM
@@ -85,15 +135,25 @@ def delete_cart(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
+    start_time = time.time()
+
     item = db.query(CartItem).filter(
         CartItem.id == id,
         CartItem.user_id == current_user.id
     ).first()
 
+    print(f"⏱️ Delete lookup took {time.time() - start_time:.4f} sec")
+
     if not item:
-        raise HTTPException(status_code=404, detail="Not found")
+        raise HTTPException(
+            status_code=404,
+            detail={"success": False, "message": "Cart item not found"}
+        )
 
     db.delete(item)
     db.commit()
 
-    return {"message": "Deleted"}
+    return {
+        "success": True,
+        "message": "Cart item deleted successfully"
+    }

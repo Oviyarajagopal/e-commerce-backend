@@ -1,15 +1,20 @@
+import os
 import redis
+from dotenv import load_dotenv
+
+load_dotenv()
+
+redis_client = None
 
 try:
     redis_client = redis.Redis(
-        host="localhost",
-        port=6379,
+        host=os.getenv("REDIS_HOST"),
+        port=int(os.getenv("REDIS_PORT")),
+        db=int(os.getenv("REDIS_DB")),
         decode_responses=True
     )
-
     redis_client.ping()
     print("✅ Redis Connected")
-
 except Exception as e:
-    print("❌ Redis not connected:", e)
-    redis_client = None
+    print("❌ Redis Error:", e)
+

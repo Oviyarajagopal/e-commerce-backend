@@ -1,9 +1,13 @@
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+import os
+from dotenv import load_dotenv
 
-# 🔗 MySQL connection URL
-DATABASE_URL = "mysql+pymysql://root:Viya2105#@localhost:3306/ecommerce_db"
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
 
 # Engine
 engine = create_engine(DATABASE_URL)

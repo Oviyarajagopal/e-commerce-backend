@@ -5,9 +5,14 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from database import SessionLocal
 from models.user import User
+import os
+from dotenv import load_dotenv
 
-SECRET_KEY = "secret"   # ✅ FIXED
-ALGORITHM = "HS256"
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
+
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
