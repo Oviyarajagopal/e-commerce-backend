@@ -5,6 +5,8 @@ from models.cart import CartItem
 from models.product import Product
 from models.order import Order, OrderItem
 from utils.auth import get_current_user
+from sqlalchemy.orm import selectinload
+from utils.email import send_order_email
 import time
 
 router = APIRouter()
@@ -16,20 +18,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-# ✅ Background Email Function
-def send_order_email(email: str, order_id: int, total: float):
-    print(f"""
-📧 Sending Email...
-To: {email}
-
-Hello,
-Your order #{order_id} has been placed successfully!
-Total Amount: ₹{total}
-
-Thank you for shopping!
-""")
 
 
 # ✅ PLACE ORDER (FIXED N+1)
@@ -156,4 +144,51 @@ def place_order(
             "order_id": order.id,
             "total_amount": total_amount
         }
+    }
+
+
+
+# ✅ GET ALL ORDERS (EAGER LOADING)
+@router.get("/orders")
+def get_orders(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    start = time.time()
+
+    orders = db.query(Order).options(
+        selectinload(Order.user),  
+        selectinload(Order.items).selectinload(OrderItem.product)
+    ).filter(
+        Order.user_id == current_user.id
+    ).all()
+
+    end = time.time()
+    print(f"⏱️ Orders fetch with eager loading took {end - start:.4f} sec")
+
+    result = []
+
+    for order in orders:
+        result.append({
+            "order_id": order.id,
+            "total_amount": order.total_amount,
+            "user": {
+                "id": order.user.id,
+                "email": order.user.email
+            },
+            "items": [
+                {
+                    "product_id": item.product.id,
+                    "product_name": item.product.name,
+                    "price": item.price,
+                    "quantity": item.quantity
+                }
+                for item in order.items
+            ]
+        })
+
+    return {
+        "success": True,
+        "message": "Orders fetched successfully",
+        "data": result
     }

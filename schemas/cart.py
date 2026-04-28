@@ -13,5 +13,6 @@ class CartResponse(BaseModel):
     product_id: int
     quantity: int
 
-    class Config:
-        orm_mode = True
+    
+class Config:
+    from_attributes = True    

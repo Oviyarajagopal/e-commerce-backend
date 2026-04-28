@@ -12,9 +12,8 @@ class UserResponse(BaseModel):
     id: int
     email: EmailStr
 
-    class Config:
-        orm_mode = True
-
+class Config:
+    from_attributes = True 
 
 # ✅ LOGIN RESPONSE (token structure)
 class TokenResponse(BaseModel):

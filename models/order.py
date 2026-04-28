@@ -7,10 +7,10 @@ class Order(Base):
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer)
+    user_id = Column(Integer,index=True)
     total_amount = Column(Float)
     status = Column(String(50), default="placed")  # placed, shipped, delivered
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow,index=True)
 
 
 class OrderItem(Base):

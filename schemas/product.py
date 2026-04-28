@@ -10,11 +10,13 @@ class ProductCreate(BaseModel):
     category: str
 
 
-# ✅ RESPONSE SCHEMA (used for API output - reduced fields)
 class ProductResponse(BaseModel):
     id: int
     name: str
+    description: str
     price: float
+    stock: int
+    category: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True   # ✅ THIS LINE FIXES YOUR ERROR

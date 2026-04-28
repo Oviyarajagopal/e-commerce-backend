@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from database import SessionLocal
@@ -6,10 +6,43 @@ from models.product import Product
 from schemas.product import ProductCreate, ProductResponse
 from config.redis_config import redis_client
 import json
-import time   # ✅ added
+import time   
 
 router = APIRouter()
 
+RATE_LIMIT = 10
+WINDOW = 60  # seconds
+
+# ✅ FIXED RATE LIMIT (IMPORTANT)
+def check_rate_limit(request: Request):
+    if not redis_client:
+        return
+
+    ip = request.client.host
+    key = f"rate_limit:{ip}"
+
+    try:
+        current = redis_client.get(key)
+
+        if current:
+            current = int(current)
+            if current >= RATE_LIMIT:
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "success": False,
+                        "message": "Too many requests. Try again later."
+                    }
+                )
+            redis_client.incr(key)
+        else:
+            redis_client.setex(key, WINDOW, 1)
+
+    except HTTPException:
+        raise 
+
+    except Exception as e:
+        print("Rate Limit Error:", e)
 
 # DB Dependency
 def get_db():
@@ -45,6 +78,7 @@ def create_product(data: ProductCreate, db: Session = Depends(get_db)):
 # ✅ 2. GET ALL PRODUCTS
 @router.get("/products")
 def get_products(
+    request: Request,  
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=50),
     category: str = None,
@@ -55,6 +89,9 @@ def get_products(
     order: str = "asc",
     db: Session = Depends(get_db)
 ):
+     # 🔥 RATE LIMIT CHECK
+    check_rate_limit(request)
+
     offset = (page - 1) * limit
 
     cache_key = f"products:list:{page}:{limit}:{category}:{min_price}:{max_price}:{search}:{sort_by}:{order}"
