@@ -236,7 +236,13 @@ def update_product(id: int, data: ProductCreate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(product)
-
+    # 🔥 CLEAR CACHE
+    try:
+        if redis_client:
+            redis_client.delete(f"product:{id}")
+            redis_client.delete("products:list")
+    except Exception as e:
+        print("Redis Delete Error:", e)
     return {
         "success": True,
         "message": "Product updated successfully",
@@ -257,7 +263,14 @@ def delete_product(id: int, db: Session = Depends(get_db)):
 
     db.delete(product)
     db.commit()
-
+    # 🔥 CLEAR CACHE
+    try:
+        if redis_client:
+            redis_client.delete(f"product:{id}")
+            redis_client.delete("products:list")
+    except Exception as e:
+        print("Redis Delete Error:", e)
+        
     return {
         "success": True,
         "message": "Product deleted successfully"

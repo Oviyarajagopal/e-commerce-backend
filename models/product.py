@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime
 from database import Base
+from models.user import User, Address
 import datetime
 
 class Product(Base):

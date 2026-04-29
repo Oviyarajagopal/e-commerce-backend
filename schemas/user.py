@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 
 
 # ✅ INPUT SCHEMA (register)
@@ -11,7 +11,7 @@ class UserCreate(BaseModel):
 class UserResponse(BaseModel):
     id: int
     email: EmailStr
-
+    model_config = ConfigDict(from_attributes=True)
 class Config:
     from_attributes = True 
 
@@ -19,3 +19,5 @@ class Config:
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
+    
+    

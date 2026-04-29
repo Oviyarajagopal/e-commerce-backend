@@ -1,9 +1,11 @@
-from fastapi import FastAPI,Request
-from database import Base, engine
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException as FastAPIHTTPException
 
-# Import models (VERY IMPORTANT)
+# Import DB (NO create_all here)
+from database import engine
+
+# Import models (VERY IMPORTANT for Alembic + relationships)
 from models import user, product, cart, order
 
 # Import routers
@@ -11,17 +13,17 @@ from routers import product as product_router
 from routers import cart as cart_router
 from routers import order as order_router
 from routers import auth
+from routers import address
+# (Add address router later when created)
 
 app = FastAPI()
 
-# Create tables
-Base.metadata.create_all(bind=engine)
-
-# Include routers
+# ✅ Include routers
 app.include_router(product_router.router)
 app.include_router(cart_router.router)
 app.include_router(order_router.router)
-app.include_router(auth.router) 
+app.include_router(auth.router)
+app.include_router(address.router)
 
 # ✅ Global HTTP Exception Handler
 @app.exception_handler(FastAPIHTTPException)
@@ -39,7 +41,6 @@ async def custom_http_exception_handler(request: Request, exc: FastAPIHTTPExcept
             "message": message
         }
     )
-
 
 # ✅ Catch unexpected errors (500)
 @app.exception_handler(Exception)

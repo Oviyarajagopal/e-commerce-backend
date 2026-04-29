@@ -4,6 +4,8 @@ from database import SessionLocal
 from models.cart import CartItem
 from models.product import Product
 from models.order import Order, OrderItem
+from models.user import Address
+from schemas.order import OrderCreate
 from utils.auth import get_current_user
 from sqlalchemy.orm import selectinload
 from utils.email import send_order_email
@@ -18,7 +20,65 @@ def get_db():
         yield db
     finally:
         db.close()
+@router.post("/orders")
+def create_order(
+    order_data: OrderCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    # ✅ Check address belongs to user
+    address = db.query(Address).filter(
+        Address.id == order_data.address_id,
+        Address.user_id == current_user.id
+    ).first()
 
+    if not address:
+        raise HTTPException(status_code=400, detail="Invalid address")
+
+    # Get cart items
+    cart_items = db.query(CartItem).filter(
+        CartItem.user_id == current_user.id
+    ).all()
+
+    if not cart_items:
+        raise HTTPException(status_code=400, detail="Cart is empty")
+
+    total_amount = 0
+    order = Order(
+        user_id=current_user.id,
+        address_id=order_data.address_id
+    )
+
+    db.add(order)
+    db.flush()
+
+    for item in cart_items:
+        product = db.query(Product).get(item.product_id)
+
+        order_item = OrderItem(
+            order_id=order.id,
+            product_id=item.product_id,
+            quantity=item.quantity,
+            price=product.price
+        )
+
+        total_amount += product.price * item.quantity
+        db.add(order_item)
+
+    order.total_amount = total_amount
+
+    # clear cart
+    db.query(CartItem).filter(
+        CartItem.user_id == current_user.id
+    ).delete()
+
+    db.commit()
+
+    return {
+        "message": "Order placed successfully",
+        "order_id": order.id,
+        "total_amount": total_amount
+    }
 
 # ✅ PLACE ORDER (FIXED N+1)
 @router.post("/orders/place")

@@ -133,7 +133,7 @@ def get_my_cart(
 def delete_cart(
     id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
     start_time = time.time()
 
