@@ -8,4 +8,4 @@ class OrderItemCreate(BaseModel):
 
 class OrderCreate(BaseModel):
     address_id: int
-    items: List[OrderItemCreate]
+   

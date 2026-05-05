@@ -1,230 +1,220 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from database import SessionLocal
 from models.cart import CartItem
 from models.product import Product
 from models.order import Order, OrderItem
-from models.user import Address
+from models.user import Address  
 from schemas.order import OrderCreate
 from utils.auth import get_current_user
-from sqlalchemy.orm import selectinload
 from utils.email import send_order_email
 import time
 
 router = APIRouter()
 
 
+# 🔌 DB Dependency
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+
+# ✅ CREATE ORDER FROM CART (WITH ADDRESS)
 @router.post("/orders")
 def create_order(
     order_data: OrderCreate,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    # ✅ Check address belongs to user
-    address = db.query(Address).filter(
-        Address.id == order_data.address_id,
-        Address.user_id == current_user.id
-    ).first()
+    try:
+        # ✅ Validate address ownership
+        address = db.query(Address).filter(
+            Address.id == order_data.address_id,
+            Address.user_id == current_user.id
+        ).first()
 
-    if not address:
-        raise HTTPException(status_code=400, detail="Invalid address")
+        if not address:
+            raise HTTPException(status_code=400, detail="Invalid address")
 
-    # Get cart items
-    cart_items = db.query(CartItem).filter(
-        CartItem.user_id == current_user.id
-    ).all()
+        # ✅ Fetch cart
+        cart_items = db.query(CartItem).filter(
+            CartItem.user_id == current_user.id
+        ).all()
 
-    if not cart_items:
-        raise HTTPException(status_code=400, detail="Cart is empty")
+        if not cart_items:
+            raise HTTPException(status_code=400, detail="Cart is empty")
 
-    total_amount = 0
-    order = Order(
-        user_id=current_user.id,
-        address_id=order_data.address_id
-    )
+        total_amount = 0
 
-    db.add(order)
-    db.flush()
-
-    for item in cart_items:
-        product = db.query(Product).get(item.product_id)
-
-        order_item = OrderItem(
-            order_id=order.id,
-            product_id=item.product_id,
-            quantity=item.quantity,
-            price=product.price
+        # ✅ Create order
+        order = Order(
+            user_id=current_user.id,
+            address_id=order_data.address_id
         )
+        db.add(order)
+        db.flush()
 
-        total_amount += product.price * item.quantity
-        db.add(order_item)
+        # ✅ Process items
+        for item in cart_items:
+            product = db.query(Product).filter(
+                Product.id == item.product_id
+            ).first()
 
-    order.total_amount = total_amount
+            if not product:
+                raise HTTPException(status_code=404, detail="Product not found")
 
-    # clear cart
-    db.query(CartItem).filter(
-        CartItem.user_id == current_user.id
-    ).delete()
+            if product.stock < item.quantity:
+                raise HTTPException(status_code=409, detail="Out of stock")
 
-    db.commit()
+            order_item = OrderItem(
+                order_id=order.id,
+                product_id=product.id,
+                quantity=item.quantity,
+                price=product.price
+            )
 
-    return {
-        "message": "Order placed successfully",
-        "order_id": order.id,
-        "total_amount": total_amount
-    }
+            total_amount += product.price * item.quantity
+            product.stock -= item.quantity
 
-# ✅ PLACE ORDER (FIXED N+1)
+            db.add(order_item)
+
+        order.total_amount = total_amount
+
+        # ✅ Clear cart
+        db.query(CartItem).filter(
+            CartItem.user_id == current_user.id
+        ).delete()
+
+        db.commit()
+
+        return {
+            "message": "Order placed successfully",
+            "order_id": order.id,
+            "total_amount": total_amount
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ✅ PLACE ORDER (OPTIMIZED + ADDRESS FIX)
 @router.post("/orders/place")
 def place_order(
+    address_id: int,   # ✅ FIX: pass address from frontend
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
     api_start = time.time()
 
-    # 1️⃣ Fetch cart
-    start = time.time()
-    cart_items = db.query(CartItem).filter(
-        CartItem.user_id == current_user.id
-    ).all()
-    end = time.time()
-    print(f"⏱️ Fetch cart took {end - start:.4f} sec")
+    try:
+        # ✅ Validate address
+        address = db.query(Address).filter(
+            Address.id == address_id,
+            Address.user_id == current_user.id
+        ).first()
 
-    if not cart_items:
-        raise HTTPException(
-            status_code=400,
-            detail={"success": False, "message": "Cart is empty"}
+        if not address:
+            raise HTTPException(status_code=400, detail="Invalid address")
+
+        # ✅ Fetch cart
+        cart_items = db.query(CartItem).filter(
+            CartItem.user_id == current_user.id
+        ).all()
+
+        if not cart_items:
+            raise HTTPException(status_code=400, detail="Cart is empty")
+
+        # ✅ Bulk fetch products
+        product_ids = [item.product_id for item in cart_items]
+        products = db.query(Product).filter(Product.id.in_(product_ids)).all()
+        product_map = {p.id: p for p in products}
+
+        total_amount = 0
+
+        # ✅ Validate + calculate
+        for item in cart_items:
+            product = product_map.get(item.product_id)
+
+            if not product:
+                raise HTTPException(status_code=404, detail="Product not found")
+
+            if product.stock < item.quantity:
+                raise HTTPException(status_code=409, detail="Out of stock")
+
+            total_amount += product.price * item.quantity
+
+        # ✅ Create order
+        order = Order(
+            user_id=current_user.id,
+            address_id=address.id,
+            total_amount=total_amount
+        )
+        db.add(order)
+        db.flush()
+
+        # ✅ Create order items + update stock
+        for item in cart_items:
+            product = product_map[item.product_id]
+
+            db.add(OrderItem(
+                order_id=order.id,
+                product_id=product.id,
+                quantity=item.quantity,
+                price=product.price
+            ))
+
+            product.stock -= item.quantity
+
+        # ✅ Clear cart
+        db.query(CartItem).filter(
+            CartItem.user_id == current_user.id
+        ).delete()
+
+        db.commit()
+
+        # ✅ Background email
+        background_tasks.add_task(
+            send_order_email,
+            current_user.email,
+            order.id,
+            total_amount
         )
 
-    # ✅ 🔥 FIX: Fetch all products in ONE query
-    start = time.time()
+        api_end = time.time()
+        print(f"🚀 Total API time: {api_end - api_start:.4f} sec")
 
-    product_ids = [item.product_id for item in cart_items]
-
-    products = db.query(Product).filter(Product.id.in_(product_ids)).all()
-
-    product_map = {p.id: p for p in products}
-
-    end = time.time()
-    print(f"⏱️ Bulk product fetch took {end - start:.4f} sec")
-
-    total_amount = 0
-
-    # 2️⃣ Validate + calculate total (NO DB CALL HERE)
-    start = time.time()
-
-    for item in cart_items:
-        product = product_map.get(item.product_id)
-
-        if not product:
-            raise HTTPException(
-                status_code=404,
-                detail={"success": False, "message": "Product not found"}
-            )
-
-        if product.stock < item.quantity:
-            raise HTTPException(
-                status_code=409,
-                detail={"success": False, "message": "Out of stock"}
-            )
-
-        total_amount += product.price * item.quantity
-
-    end = time.time()
-    print(f"⏱️ Validation took {end - start:.4f} sec")
-
-    # 3️⃣ Create order
-    start = time.time()
-
-    order = Order(
-        user_id=current_user.id,
-        total_amount=total_amount
-    )
-
-    db.add(order)
-    db.commit()
-    db.refresh(order)
-
-    end = time.time()
-    print(f"⏱️ Create order took {end - start:.4f} sec")
-
-    # 4️⃣ Create order items + update stock (NO DB CALL)
-    start = time.time()
-
-    for item in cart_items:
-        product = product_map[item.product_id]
-
-        order_item = OrderItem(
-            order_id=order.id,
-            product_id=product.id,
-            quantity=item.quantity,
-            price=product.price
-        )
-
-        product.stock -= item.quantity
-        db.add(order_item)
-
-    end = time.time()
-    print(f"⏱️ Create order items took {end - start:.4f} sec")
-
-    # 5️⃣ Clear cart
-    start = time.time()
-
-    db.query(CartItem).filter(
-        CartItem.user_id == current_user.id
-    ).delete()
-
-    db.commit()
-
-    end = time.time()
-    print(f"⏱️ Clear cart took {end - start:.4f} sec")
-
-    # 6️⃣ Background email
-    background_tasks.add_task(
-        send_order_email,
-        current_user.email,
-        order.id,
-        total_amount
-    )
-
-    api_end = time.time()
-    print(f"🚀 Total API time: {api_end - api_start:.4f} sec")
-
-    return {
-        "success": True,
-        "message": "Order placed successfully",
-        "data": {
-            "order_id": order.id,
-            "total_amount": total_amount
+        return {
+            "success": True,
+            "message": "Order placed successfully",
+            "data": {
+                "order_id": order.id,
+                "total_amount": total_amount
+            }
         }
-    }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-
-# ✅ GET ALL ORDERS (EAGER LOADING)
+# ✅ GET ALL ORDERS (WITH ADDRESS ADDED)
 @router.get("/orders")
 def get_orders(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    start = time.time()
-
     orders = db.query(Order).options(
-        selectinload(Order.user),  
+        selectinload(Order.user),
+        selectinload(Order.address),   # ✅ NEW
         selectinload(Order.items).selectinload(OrderItem.product)
     ).filter(
         Order.user_id == current_user.id
     ).all()
-
-    end = time.time()
-    print(f"⏱️ Orders fetch with eager loading took {end - start:.4f} sec")
 
     result = []
 
@@ -232,9 +222,11 @@ def get_orders(
         result.append({
             "order_id": order.id,
             "total_amount": order.total_amount,
-            "user": {
-                "id": order.user.id,
-                "email": order.user.email
+            "status": order.status,
+            "address": {   # ✅ INCLUDE ADDRESS
+                "full_name": order.address.full_name,
+                "city": order.address.city,
+                "pincode": order.address.pincode
             },
             "items": [
                 {

@@ -6,12 +6,13 @@ from passlib.context import CryptContext
 from database import SessionLocal
 from models.user import User
 import os
+from config.config import settings
 from dotenv import load_dotenv
 
 load_dotenv()
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = os.getenv("ALGORITHM")
+SECRET_KEY = settings.JWT_SECRET
+ALGORITHM = settings.JWT_ALGORITHM
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")

@@ -25,7 +25,11 @@ def upgrade():
     op.add_column('users', sa.Column('is_admin', sa.Boolean(), nullable=True))
     op.add_column('users', sa.Column('created_at', sa.DateTime(), nullable=True))
     op.add_column('users', sa.Column('updated_at', sa.DateTime(), nullable=True))
-
+    op.create_foreign_key(
+    'fk_orders_address',
+    'orders', 'address',
+    ['address_id'], ['id']
+)
     op.create_table(
         'addresses',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -51,3 +55,6 @@ def downgrade():
     op.drop_column('users', 'is_verified')
     op.drop_column('users', 'is_active')
     op.drop_column('users', 'phone_number')
+    
+    op.drop_constraint('fk_orders_address', 'orders', type_='foreignkey')
+    op.drop_column('orders', 'address_id')

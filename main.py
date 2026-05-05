@@ -14,16 +14,29 @@ from routers import cart as cart_router
 from routers import order as order_router
 from routers import auth
 from routers import address
+from routers.health import router as health_router
+import time
+from fastapi import Request
+from utils.logger import logger
+from fastapi.middleware.cors import CORSMiddleware
 # (Add address router later when created)
 
 app = FastAPI()
-
+ 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # React app
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 # ✅ Include routers
 app.include_router(product_router.router)
 app.include_router(cart_router.router)
 app.include_router(order_router.router)
 app.include_router(auth.router)
 app.include_router(address.router)
+app.include_router(health_router)
 
 # ✅ Global HTTP Exception Handler
 @app.exception_handler(FastAPIHTTPException)
@@ -54,3 +67,26 @@ async def global_exception_handler(request: Request, exc: Exception):
             "message": "Internal Server Error"
         }
     )
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+
+    try:
+        response = await call_next(request)
+
+        duration = round((time.time() - start_time) * 1000, 2)
+
+        logger.info(
+            f"{request.method} {request.url.path} {response.status_code} {duration}ms"
+        )
+
+        return response
+
+    except Exception as e:
+        duration = round((time.time() - start_time) * 1000, 2)
+
+        logger.error(
+            f"{request.method} {request.url.path} ERROR {str(e)} {duration}ms"
+        )
+        raise e

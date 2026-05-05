@@ -32,15 +32,13 @@ class Address(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"))
 
-    full_name = Column(String)
-    phone = Column(String)
-    address_line = Column(String)
-    city = Column(String)
-    state = Column(String)
-    pincode = Column(String)
-    country = Column(String)
+    full_name = Column(String(100))
+    phone = Column(String(20))
+    address_line = Column(String(255))
+    city = Column(String(100))
+    state = Column(String(100))
+    pincode = Column(String(10))
+    country = Column(String(50))
 
     user = relationship("User", back_populates="addresses")
-    order_items = relationship("OrderItem", back_populates="address")
-
-    
+    orders = relationship("Order", back_populates="address")
