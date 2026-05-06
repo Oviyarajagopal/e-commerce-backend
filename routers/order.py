@@ -10,6 +10,15 @@ from utils.auth import get_current_user
 from utils.email import send_order_email
 import time
 
+# Order status flow
+ORDER_FLOW = {
+    "PENDING": ["CONFIRMED", "CANCELLED"],
+    "CONFIRMED": ["SHIPPED", "CANCELLED"],
+    "SHIPPED": ["DELIVERED", "CANCELLED"],
+    "DELIVERED": [],
+    "CANCELLED": []
+}
+
 router = APIRouter()
 
 
@@ -243,4 +252,71 @@ def get_orders(
         "success": True,
         "message": "Orders fetched successfully",
         "data": result
+    }
+
+
+@router.put("/orders/{order_id}/status")
+def update_order_status(
+    order_id: int,
+    new_status: str,
+    db: Session = Depends(get_db)
+):
+    # 1. Get order
+    order = db.query(Order).filter(Order.id == order_id).first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # 2. Get current status
+    current_status = order.status
+
+    # 3. Validate transition
+    if new_status not in ORDER_FLOW.get(current_status, []):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status change: {current_status} → {new_status}"
+        )
+
+    # 4. Update status
+    order.status = new_status
+    db.commit()
+    db.refresh(order)
+
+    return {
+        "message": "Order status updated successfully",
+        "order_id": order.id,
+        "new_status": order.status
+    }
+
+
+@router.put("/orders/{order_id}/cancel")
+def cancel_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    # 1. Get order
+    order = db.query(Order).filter(Order.id == order_id).first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # 2. Check ownership
+    if order.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    # 3. Prevent invalid cancel
+    if order.status == "DELIVERED":
+        raise HTTPException(status_code=400, detail="Cannot cancel delivered order")
+
+    if order.status == "CANCELLED":
+        raise HTTPException(status_code=400, detail="Order already cancelled")
+
+    # 4. Cancel order
+    order.status = "CANCELLED"
+    db.commit()
+
+    return {
+        "message": "Order cancelled successfully",
+        "order_id": order.id
     }
